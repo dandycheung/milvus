@@ -102,6 +102,13 @@ func WithPartitionID(partitionID int64) SegmentFilter {
 	})
 }
 
+func WithPartitionIDs(partitionIDs []int64) SegmentFilter {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
+		idSet := typeutil.NewSet(partitionIDs...)
+		return idSet.Contain(info.partitionID)
+	})
+}
+
 func WithStartPosNotRecorded() SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return !info.startPosRecorded
@@ -111,12 +118,6 @@ func WithStartPosNotRecorded() SegmentFilter {
 func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.level == level
-	})
-}
-
-func WithCompacted() SegmentFilter {
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.compactTo != 0
 	})
 }
 
@@ -155,12 +156,6 @@ func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bfs.Roll(newStats...)
-	}
-}
-
-func CompactTo(compactTo int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.compactTo = compactTo
 	}
 }
 

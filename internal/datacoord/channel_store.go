@@ -28,11 +28,10 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -154,9 +153,7 @@ func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
 		switch op.Type {
 		case Add, Watch, Release:
 			tmpWatchInfo := proto.Clone(ch.GetWatchInfo()).(*datapb.ChannelWatchInfo)
-			if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-				tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
-			}
+			tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
 			info, err := proto.Marshal(tmpWatchInfo)
 			if err != nil {
 				return saves, removals, err

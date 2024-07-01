@@ -38,7 +38,6 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -47,10 +46,11 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -124,12 +124,12 @@ type Server struct {
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
 
-	compactionTrigger     trigger
-	compactionHandler     compactionPlanContext
-	compactionViewManager *CompactionViewManager
-	syncSegmentsScheduler *SyncSegmentsScheduler
+	compactionTrigger        trigger
+	compactionHandler        compactionPlanContext
+	compactionTriggerManager *CompactionTriggerManager
 
-	metricsCacheManager *metricsinfo.MetricsCacheManager
+	syncSegmentsScheduler *SyncSegmentsScheduler
+	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
 	buildIndexCh    chan UniqueID
@@ -152,9 +152,10 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexBuilder              *indexBuilder
 	indexNodeManager          *IndexNodeManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	taskScheduler *taskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -275,13 +276,13 @@ func (s *Server) Register() error {
 			err := s.session.ProcessActiveStandBy(s.activateFunc)
 			if err != nil {
 				log.Error("failed to activate standby datacoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 
 			err = s.icSession.ForceActiveStandby(nil)
 			if err != nil {
 				log.Error("failed to force activate standby indexcoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()
@@ -373,6 +374,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initTaskScheduler(storageCli)
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
@@ -385,7 +387,6 @@ func (s *Server) initDataCoord() error {
 	log.Info("init segment manager done")
 
 	s.initGarbageCollection(storageCli)
-	s.initIndexBuilder(storageCli)
 
 	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
@@ -419,10 +420,11 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
+	s.taskScheduler.Start()
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
 		s.compactionTrigger.start()
-		s.compactionViewManager.Start()
+		s.compactionTriggerManager.Start()
 	}
 	s.startServerLoop()
 
@@ -485,16 +487,9 @@ func (s *Server) initCluster() error {
 	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
 
 	var err error
-	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
-		if err != nil {
-			return err
-		}
-	} else {
-		s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker(), withBgChecker())
-		if err != nil {
-			return err
-		}
+	s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+	if err != nil {
+		return err
 	}
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil
@@ -526,14 +521,13 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 }
 
 func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
-	triggerv2 := NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler)
-	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 }
 
 func (s *Server) stopCompactionHandler() {
 	s.compactionHandler.stop()
-	s.compactionViewManager.Close()
+	s.compactionTriggerManager.Close()
 }
 
 func (s *Server) createCompactionTrigger() {
@@ -690,9 +684,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
-	if s.indexBuilder == nil {
-		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
+	if s.taskScheduler == nil {
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
 	}
 }
 
@@ -733,7 +727,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
 
-	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, mqwrapper.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, common.SubscriptionPositionLatest)
 	log.Info("DataCoord creates the timetick channel consumer",
 		zap.String("timeTickChannel", timeTickChannel),
 		zap.String("subscription", subName))
@@ -1116,7 +1110,7 @@ func (s *Server) Stop() error {
 	}
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
-	s.indexBuilder.Stop()
+	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
 
 	s.cluster.Close()

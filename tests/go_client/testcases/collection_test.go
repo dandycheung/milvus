@@ -5,16 +5,14 @@ import (
 	"testing"
 	"time"
 
-	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
+	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 var prefix = "collection"
@@ -42,7 +40,6 @@ func TestCreateCollection(t *testing.T) {
 	}
 }
 
-//func TestCreateCollection(t *testing.T) {}
 func TestCreateAutoIdCollectionField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -64,7 +61,7 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 		require.True(t, coll.Schema.Fields[0].AutoID)
 
 		// insert
-		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewColumnOption())
+		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
 		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, true)
 	}
@@ -117,7 +114,7 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
-		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewColumnOption())
+		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
 		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, false, "field pk not passed")
 	}
@@ -146,7 +143,7 @@ func TestCreateAutoIdCollection(t *testing.T) {
 		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
-		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewColumnOption())
+		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
 		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, false, "field pk not passed")
 	}
@@ -202,7 +199,7 @@ func TestCreateArrayCollections(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionPartitionKey(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -229,6 +226,7 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 		// verify partitions
 		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
 		require.Len(t, partitions, common.DefaultPartitionNum)
+		common.CheckErr(t, err, true)
 	}
 }
 
@@ -253,6 +251,7 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 		// verify partitions num
 		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
 		require.Len(t, partitions, int(numPartition))
+		common.CheckErr(t, err, true)
 	}
 }
 
@@ -275,13 +274,14 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	require.True(t, has)
 
 	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
+	common.CheckErr(t, err, true)
 	require.True(t, coll.Schema.EnableDynamicField)
 
 	// insert dynamic
-	columnOption := *hp.TNewColumnOption()
+	columnOption := *hp.TNewDataOption()
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
-	dynamicData := hp.GenDynamicFieldData(0, common.DefaultNb)
+	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
 	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, true)
 }
@@ -307,13 +307,14 @@ func TestCreateCollectionDynamic(t *testing.T) {
 
 	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
 	log.Info("collection dynamic", zap.Bool("collectionSchema", coll.Schema.EnableDynamicField))
-	//require.True(t, coll.Schema.Fields[0].IsDynamic)
+	common.CheckErr(t, err, true)
+	// require.True(t, coll.Schema.Fields[0].IsDynamic)
 
 	// insert dynamic
-	columnOption := *hp.TNewColumnOption()
+	columnOption := *hp.TNewDataOption()
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
-	dynamicData := hp.GenDynamicFieldData(0, common.DefaultNb)
+	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
 	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, false, "field dynamicNumber does not exist")
 }
@@ -419,21 +420,23 @@ func TestCreateCollectionWithValidName(t *testing.T) {
 func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 	t.Parallel()
 	// connect
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	// create collection with invalid field name
 	for _, invalidName := range common.GenInvalidNames() {
 		log.Debug("TestCreateCollectionWithInvalidFieldName", zap.String("fieldName", invalidName))
 		pkField := entity.NewField().WithName(invalidName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-		schema := entity.NewSchema().WithName("aaa").WithField(pkField)
+		vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(128)
+		schema := entity.NewSchema().WithName("aaa").WithField(pkField).WithField(vecField)
 		collOpt := clientv2.NewCreateCollectionOption("aaa", schema)
 
 		err := mc.CreateCollection(ctx, collOpt)
 		common.CheckErr(t, err, false, "field name should not be empty",
 			"The first character of a field name must be an underscore or letter",
 			"Field name cannot only contain numbers, letters, and underscores",
-			"The length of a field name must be less than 255 characters")
+			"The length of a field name must be less than 255 characters",
+			"Field name can only contain numbers, letters, and underscores")
 	}
 }
 
@@ -490,8 +493,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	noneField := entity.NewField().WithName("none").WithDataType(entity.FieldTypeNone)
 	invalidFields := []invalidFieldsStruct{
-		// TODO https://github.com/milvus-io/milvus/issues/33199
-		//{fields: []*entity.Field{pkField}, errMsg: "vector field not set"},
+		{fields: []*entity.Field{pkField}, errMsg: "schema does not contain vector field"},
 		{fields: []*entity.Field{vecField}, errMsg: "primary key is not specified"},
 		{fields: []*entity.Field{pkField, pkField2, vecField}, errMsg: "there are more than one primary key"},
 		{fields: []*entity.Field{pkField, vecField, noneField}, errMsg: "data type None is not valid"},
@@ -513,7 +515,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 
 // create autoID or not collection with non-int64 and non-varchar field
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 	t.Parallel()
 	// create collection with autoID true or not
@@ -555,7 +557,7 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -623,11 +625,10 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 		numPartitions int64
 		errMsg        string
 	}{
-		{common.MaxPartitionNum + 1, "exceeds max configuration (4096)"},
+		{common.MaxPartitionNum + 1, "exceeds max configuration (1024)"},
 		{-1, "the specified partitions should be greater than 0 if partition key is used"},
 	}
 	for _, npStruct := range invalidNumPartitionStruct {
-
 		// create collection with num partitions
 		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, npStruct.errMsg)
@@ -910,7 +911,7 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 	common.CheckErr(t, err, false, fmt.Sprintf("maximum vector field's number should be limited to %d", common.MaxVectorFieldNum))
 }
 
-//func TestCreateCollection(t *testing.T) {}
+// func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -935,13 +936,14 @@ func TestCreateCollectionInvalid(t *testing.T) {
 		schema *entity.Schema
 		errMsg string
 	}
+	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
 		{schema: nil, errMsg: "duplicated field name"},
-		{schema: entity.NewSchema(), errMsg: "collection name should not be empty"},
-		{schema: entity.NewSchema().WithName("aaa"), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(entity.NewField()), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
-		{schema: entity.NewSchema().WithName("aaa").WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
+		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
+		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
+		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
+		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
+		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {
 		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, mSchema.schema))

@@ -35,9 +35,15 @@ const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
+const char NULLABLE[] = "nullable";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
+const char ANALYZE_ROOT_PATH[] = "analyze_stats";
+const char CENTROIDS_NAME[] = "centroids";
+const char OFFSET_MAPPING_NAME[] = "offset_mapping";
+const char NUM_CLUSTERS[] = "num_clusters";
+const char KMEANS_CLUSTER[] = "KMEANS";
 const char VEC_OPT_FIELDS[] = "opt_fields";
 
 const char DEFAULT_PLANNODE_ID[] = "0";

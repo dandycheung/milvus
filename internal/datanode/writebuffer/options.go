@@ -40,8 +40,8 @@ func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 		syncPolicies: []SyncPolicy{
 			GetFullBufferPolicy(),
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
-			GetCompactedSegmentsPolicy(metacache),
 			GetSealedSegmentsPolicy(metacache),
+			GetDroppedSegmentPolicy(metacache),
 		},
 	}
 }

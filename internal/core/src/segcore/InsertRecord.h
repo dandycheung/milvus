@@ -30,6 +30,7 @@
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
+#include "storage/MmapManager.h"
 
 namespace milvus::segcore {
 
@@ -146,7 +147,10 @@ class OffsetOrderedMap : public OffsetMap {
         seg_offsets.reserve(limit);
         auto it = map_.begin();
         for (; hit_num < limit && it != map_.end(); it++) {
-            for (auto seg_offset : it->second) {
+            // Offsets in the growing segment are ordered by timestamp,
+            // so traverse from back to front to obtain the latest offset.
+            for (int i = it->second.size() - 1; i >= 0; --i) {
+                auto seg_offset = it->second[i];
                 if (seg_offset >= size) {
                     // Frequently concurrent insert/query will cause this case.
                     continue;
@@ -155,9 +159,8 @@ class OffsetOrderedMap : public OffsetMap {
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
-                    if (hit_num >= limit) {
-                        break;
-                    }
+                    // PK hit, no need to continue traversing offsets with the same PK.
+                    break;
                 }
             }
         }
@@ -212,7 +215,8 @@ class OffsetOrderedArray : public OffsetMap {
             PanicInfo(Unsupported,
                       "OffsetOrderedArray could not insert after seal");
         }
-        array_.push_back(std::make_pair(std::get<T>(pk), offset));
+        array_.push_back(
+            std::make_pair(std::get<T>(pk), static_cast<int32_t>(offset)));
     }
 
     void
@@ -258,6 +262,7 @@ class OffsetOrderedArray : public OffsetMap {
         if (!false_filtered_out) {
             cnt = size - bitset.count();
         }
+        auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -274,7 +279,7 @@ class OffsetOrderedArray : public OffsetMap {
                 hit_num++;
             }
         }
-        return {seg_offsets, it != array_.end()};
+        return {seg_offsets, more_hit_than_limit && it != array_.end()};
     }
 
     void
@@ -285,13 +290,16 @@ class OffsetOrderedArray : public OffsetMap {
 
  private:
     bool is_sealed = false;
-    std::vector<std::pair<T, int64_t>> array_;
+    std::vector<std::pair<T, int32_t>> array_;
 };
 
 template <bool is_sealed = false>
 struct InsertRecord {
-    InsertRecord(const Schema& schema, int64_t size_per_chunk)
-        : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
+    InsertRecord(
+        const Schema& schema,
+        const int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
+        : timestamps_(size_per_chunk), mmap_descriptor_(mmap_descriptor) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
 
         for (auto& field : schema) {
@@ -301,7 +309,7 @@ struct InsertRecord {
                 pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
                     case DataType::INT64: {
-                        if (is_sealed) {
+                        if constexpr (is_sealed) {
                             pk2offset_ =
                                 std::make_unique<OffsetOrderedArray<int64_t>>();
                         } else {
@@ -311,7 +319,7 @@ struct InsertRecord {
                         break;
                     }
                     case DataType::VARCHAR: {
-                        if (is_sealed) {
+                        if constexpr (is_sealed) {
                             pk2offset_ = std::make_unique<
                                 OffsetOrderedArray<std::string>>();
                         } else {
@@ -530,6 +538,9 @@ struct InsertRecord {
         AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
+        AssertInfo(
+            fields_data_.at(field_id) != nullptr,
+            "fields_data_ at i is null" + std::to_string(field_id.get()));
         return fields_data_.at(field_id).get();
     }
 
@@ -558,8 +569,9 @@ struct InsertRecord {
     void
     append_field_data(FieldId field_id, int64_t size_per_chunk) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        fields_data_.emplace(
-            field_id, std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
+        fields_data_.emplace(field_id,
+                             std::make_unique<ConcurrentVector<Type>>(
+                                 size_per_chunk, mmap_descriptor_));
     }
 
     // append a column of vector type
@@ -569,7 +581,7 @@ struct InsertRecord {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
         fields_data_.emplace(field_id,
                              std::make_unique<ConcurrentVector<VectorType>>(
-                                 dim, size_per_chunk));
+                                 dim, size_per_chunk, mmap_descriptor_));
     }
 
     void
@@ -590,7 +602,6 @@ struct InsertRecord {
     void
     clear() {
         timestamps_.clear();
-        row_ids_.clear();
         reserved = 0;
         ack_responder_.clear();
         timestamp_index_ = TimestampIndex();
@@ -605,7 +616,6 @@ struct InsertRecord {
 
  public:
     ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<idx_t> row_ids_;
 
     // used for preInsert of growing segment
     std::atomic<int64_t> reserved = 0;
@@ -620,6 +630,7 @@ struct InsertRecord {
  private:
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
     mutable std::shared_mutex shared_mutex_{};
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };
 
 }  // namespace milvus::segcore

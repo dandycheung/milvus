@@ -158,6 +158,13 @@ func (s *BulkInsertSuite) run() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
+	for _, segment := range segments {
+		s.True(len(segment.GetBinlogs()) > 0)
+		s.NoError(CheckLogID(segment.GetBinlogs()))
+		s.True(len(segment.GetDeltalogs()) == 0)
+		s.True(len(segment.GetStatslogs()) > 0)
+		s.NoError(CheckLogID(segment.GetStatslogs()))
+	}
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -192,6 +199,7 @@ func (s *BulkInsertSuite) run() {
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	// s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 }
 
 func (s *BulkInsertSuite) TestMultiFileTypes() {

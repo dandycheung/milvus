@@ -39,6 +39,14 @@ func wrapSelectSegmentFuncPolicy(fn SelectSegmentFunc, reason string) SelectSegm
 	}
 }
 
+func GetDroppedSegmentPolicy(meta metacache.MetaCache) SyncPolicy {
+	return wrapSelectSegmentFuncPolicy(
+		func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
+			ids := meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Dropped))
+			return ids
+		}, "segment dropped")
+}
+
 func GetFullBufferPolicy() SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(
 		func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
@@ -46,13 +54,6 @@ func GetFullBufferPolicy() SyncPolicy {
 				return buf.segmentID, buf.IsFull()
 			})
 		}, "buffer full")
-}
-
-func GetCompactedSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
-	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
-		segmentIDs := lo.Map(buffers, func(buffer *segmentBuffer, _ int) int64 { return buffer.segmentID })
-		return meta.GetSegmentIDsBy(metacache.WithSegmentIDs(segmentIDs...), metacache.WithCompacted())
-	}, "segment compacted")
 }
 
 func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {

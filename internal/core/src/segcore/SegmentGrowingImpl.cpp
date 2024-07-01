@@ -110,7 +110,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 3: fill into Segment.ConcurrentVector
     insert_record_.timestamps_.set_data_raw(
         reserved_offset, timestamps_raw, num_rows);
-    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
 
     // update the mem size of timestamps and row IDs
     stats_.mem_size += num_rows * (sizeof(Timestamp) + sizeof(idx_t));
@@ -224,7 +223,6 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
 
         if (field_id == RowFieldID) {
-            insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
             continue;
         }
 
@@ -313,7 +311,6 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
         }
 
         if (field_id == RowFieldID) {
-            insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
             continue;
         }
 
@@ -422,6 +419,12 @@ SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto vec = get_insert_record().get_field_data_base(field_id);
     return vec->get_span_base(chunk_id);
+}
+
+std::vector<std::string_view>
+SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk view impl not implement for growing segment");
 }
 
 int64_t
@@ -666,7 +669,11 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) = std::move(T(src[offset]));
+        if (IsVariableTypeSupportInChunk<S> && mmap_descriptor_ != nullptr) {
+            dst->at(i) = std::move(T(src.view_element(offset)));
+        } else {
+            dst->at(i) = std::move(T(src[offset]));
+        }
     }
 }
 
@@ -766,10 +773,8 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
                                            static_cast<Timestamp*>(output));
             break;
         case SystemFieldType::RowId:
-            bulk_subscript_impl<int64_t>(&this->insert_record_.row_ids_,
-                                         seg_offsets,
-                                         count,
-                                         static_cast<int64_t*>(output));
+            PanicInfo(ErrorCode::Unsupported,
+                      "RowId retrieve is not supported");
             break;
         default:
             PanicInfo(DataTypeInvalid, "unknown subscript fields");

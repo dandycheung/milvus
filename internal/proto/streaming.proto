@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package milvus.proto.log;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/streamingpb";
+
+import "milvus.proto";
+import "google/protobuf/empty.proto";
+
+//
+// Common
+//
+
+// MessageID is the unique identifier of a message.
+message MessageID {
+    bytes id = 1;
+}
+
+// Message is the basic unit of communication between publisher and consumer.
+message Message {
+    bytes payload = 1; // message body
+    map<string, string> properties = 2; // message properties
+}
+
+// PChannelInfo is the information of a pchannel info.
+message PChannelInfo {
+    string name = 1; // channel name
+    int64 term = 2; // A monotonic increasing term, every time the channel is recovered or moved to another streamingnode, the term will increase by meta server.
+    int64 server_id = 3; // The log node id address of the channel.
+}
+
+// VChannelInfo is the information of a vchannel info.
+message VChannelInfo {
+    string name = 1;
+}
+
+message DeliverPolicy {
+    oneof policy {
+        google.protobuf.Empty all = 1; // deliver all messages.
+        google.protobuf.Empty latest = 2; // deliver the latest message.
+        MessageID start_from = 3; // deliver message from this message id. [startFrom, ...]
+        MessageID start_after = 4; // deliver message after this message id. (startAfter, ...]
+    }
+}

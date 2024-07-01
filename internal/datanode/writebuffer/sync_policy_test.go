@@ -73,6 +73,15 @@ func (s *SyncPolicySuite) TestSyncStalePolicy() {
 	s.Equal(0, len(ids), "")
 }
 
+func (s *SyncPolicySuite) TestSyncDroppedPolicy() {
+	metacache := metacache.NewMockMetaCache(s.T())
+	policy := GetDroppedSegmentPolicy(metacache)
+	ids := []int64{1, 2, 3}
+	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(ids)
+	result := policy.SelectSegments([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now(), 0))
+	s.ElementsMatch(ids, result)
+}
+
 func (s *SyncPolicySuite) TestSealedSegmentsPolicy() {
 	metacache := metacache.NewMockMetaCache(s.T())
 	policy := GetSealedSegmentsPolicy(metacache)
@@ -81,16 +90,6 @@ func (s *SyncPolicySuite) TestSealedSegmentsPolicy() {
 	metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 
 	result := policy.SelectSegments([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now(), 0))
-	s.ElementsMatch(ids, result)
-}
-
-func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
-	metacache := metacache.NewMockMetaCache(s.T())
-	policy := GetCompactedSegmentsPolicy(metacache)
-	ids := []int64{1, 2}
-	metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return(ids)
-
-	result := policy.SelectSegments([]*segmentBuffer{{segmentID: 1}, {segmentID: 2}}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch(ids, result)
 }
 
