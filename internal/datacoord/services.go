@@ -571,6 +571,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+
+		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
 		return merr.Success(), nil
 	}
 
@@ -686,6 +688,12 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 		return commonpb.StateCode_Abnormal
 	}
 	return code.(commonpb.StateCode)
+}
+
+// UpdateStateCode update state code
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
+	s.stateCode.Store(code)
+	log.Ctx(s.ctx).Info("update datacoord state", zap.String("state", code.String()))
 }
 
 // GetComponentStates returns DataCoord's current state
@@ -1438,6 +1446,13 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	if err != nil {
 		log.Warn("failed to update channel checkpoint", zap.Error(err))
 		return merr.Status(err), nil
+	}
+
+	for _, pos := range checkpoints {
+		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+			continue
+		}
+		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
 	}
 
 	return merr.Success(), nil
