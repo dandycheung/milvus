@@ -268,12 +268,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
 
-	//	refresh the meta of the collection.
-	_, err := s.handler.GetCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
-	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -1838,6 +1832,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return importFile
 	})
 	importCollectionInfo, err := s.handler.GetCollection(ctx, in.GetCollectionID())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
+		return resp, nil
+	}
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("get collection failed, err=%w", err)))
 		return resp, nil

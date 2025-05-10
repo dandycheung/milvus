@@ -334,7 +334,7 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(milvus::DataType data_type, ChunkedColumnBase* data) {
+    insert_pks(milvus::DataType data_type, ChunkedColumnInterface* data) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         switch (data_type) {
@@ -353,7 +353,10 @@ struct InsertRecord {
             case DataType::VARCHAR: {
                 auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto pw = data->StringViews(i);
+                    auto column =
+                        reinterpret_cast<ChunkedVariableColumn<std::string>*>(
+                            data);
+                    auto pw = column->StringViews(i);
                     auto pks = pw.get().first;
                     for (auto& pk : pks) {
                         pk2offset_->insert(std::string(pk), offset++);
@@ -412,7 +415,6 @@ struct InsertRecord {
 
  protected:
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     mutable std::shared_mutex shared_mutex_{};
 };
 
@@ -705,6 +707,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
     AckResponder ack_responder_;
 
  private:
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
 };
 

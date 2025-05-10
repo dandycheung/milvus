@@ -143,10 +143,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     // deprecated
-    const index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
-        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(
-            chunk_id);
+        return PinWrapper<const index::IndexBase*>(
+            indexing_record_.get_field_indexing(field_id)
+                .get_chunk_indexing(chunk_id)
+                .get());
     }
 
     int64_t
@@ -200,12 +202,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t count,
                         T* output) const;
 
-    template <typename S, typename T = S>
+    template <typename S>
     void
-    bulk_subscript_ptr_impl(const VectorBase* vec_raw,
-                            const int64_t* seg_offsets,
-                            int64_t count,
-                            google::protobuf::RepeatedPtrField<T>* dst) const;
+    bulk_subscript_ptr_impl(
+        const VectorBase* vec_raw,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* dst) const;
 
     // for scalar array vectors
     template <typename T>

@@ -29,7 +29,7 @@ SearchOnSealedIndex(const Schema& schema,
 
 void
 SearchOnSealedColumn(const Schema& schema,
-                     ChunkedColumnBase* column,
+                     ChunkedColumnInterface* column,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
                      const void* query_data,
@@ -37,16 +37,5 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t row_count,
                      const BitsetView& bitset,
                      SearchResult& result);
-
-void
-SearchOnSealedData(const Schema& schema,
-                   const void* vec_data,
-                   const SearchInfo& search_info,
-                   const std::map<std::string, std::string>& index_info,
-                   const void* query_data,
-                   int64_t num_queries,
-                   int64_t row_count,
-                   const BitsetView& bitset,
-                   SearchResult& result);
 
 }  // namespace milvus::query

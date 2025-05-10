@@ -32,6 +32,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
 
@@ -148,6 +149,12 @@ std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files);
 
+std::vector<FieldDataPtr>
+GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
+                           int64_t field_id,
+                           DataType data_type,
+                           int64_t dim);
+
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,
@@ -167,6 +174,9 @@ ReleaseArrowUnused();
 
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
+
+milvus_storage::ArrowFileSystemPtr
+InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
 FieldDataPtr
 CreateFieldData(const DataType& type,
@@ -208,6 +218,19 @@ SortByPath(std::vector<std::string>& paths) {
                   return std::stol(a.substr(a.find_last_of("/") + 1)) <
                          std::stol(b.substr(b.find_last_of("/") + 1));
               });
+}
+
+// same as SortByPath, but with pair of path and entries_nums
+inline void
+SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
+    std::sort(
+        paths.begin(),
+        paths.end(),
+        [](const std::pair<std::string, int64_t>& a,
+           const std::pair<std::string, int64_t>& b) {
+            return std::stol(a.first.substr(a.first.find_last_of("/") + 1)) <
+                   std::stol(b.first.substr(b.first.find_last_of("/") + 1));
+        });
 }
 
 // used only for test

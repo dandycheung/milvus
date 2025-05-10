@@ -33,11 +33,13 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     using Index = index::ScalarIndex<IndexInnerType>;
 
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+        auto index_ptr = const_cast<Index*>(pw.get());
 
-        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
-            index.GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
+        if (index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::HYBRID ||
+            index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::BITMAP) {
             return false;
         }
     }
@@ -466,6 +468,40 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::PostfixMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::InnerMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,
@@ -829,6 +865,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 }
                 break;
             }
+            case proto::plan::InnerMatch:
+            case proto::plan::PostfixMatch:
             case proto::plan::PrefixMatch: {
                 for (size_t i = 0; i < size; ++i) {
                     auto offset = i;
@@ -1209,8 +1247,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         CompareValueWithOpType(type, value, val, op_type);
                     case proto::plan::NotEqual:
                         CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::PrefixMatch:
-                    case proto::plan::Match:
                     default:
                         return false;
                 }
@@ -1340,6 +1376,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                 }
                             }
                         }
+                    case proto::plan::InnerMatch:
+                    case proto::plan::PostfixMatch:
                     case proto::plan::PrefixMatch:
                         if constexpr (std::is_same_v<GetType,
                                                      proto::plan::Array>) {
@@ -1478,6 +1516,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::PostfixMatch: {
+                UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryIndexFunc<T, proto::plan::InnerMatch> func;
                 res = std::move(func(index_ptr, val));
                 break;
             }
@@ -1688,6 +1736,29 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFunc<T, proto::plan::PostfixMatch, filter_type>
+                    func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFunc<T, proto::plan::InnerMatch, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             case proto::plan::Match: {
                 UnaryElementFunc<T, proto::plan::Match, filter_type> func;
                 func(data,
@@ -1757,17 +1828,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
-    bool res = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
-    use_index_ = res;
-    return res;
+    use_index_ = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
+    return use_index_;
 }
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    use_index_ =
+    auto has_index =
         segment_->HasIndex(field_id_,
                            milvus::Json::pointer(expr_->column_.nested_path_),
                            val_type);
+    switch (val_type) {
+        case DataType::STRING:
+            use_index_ = has_index &&
+                         expr_->op_type_ != proto::plan::OpType::Match &&
+                         expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                         expr_->op_type_ != proto::plan::OpType::InnerMatch;
+            break;
+        default:
+            use_index_ = has_index;
+    }
     return use_index_;
 }
 

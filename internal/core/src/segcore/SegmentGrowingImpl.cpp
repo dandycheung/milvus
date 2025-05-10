@@ -27,6 +27,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/Schema.h"
+#include "common/Json.h"
 #include "common/Types.h"
 #include "common/Common.h"
 #include "fmt/format.h"
@@ -271,12 +272,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
-        std::sort(insert_files.begin(),
-                  insert_files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                             std::stol(b.substr(b.find_last_of('/') + 1));
-                  });
+        storage::SortByPath(insert_files);
 
         auto channel = std::make_shared<FieldDataChannel>();
         auto& pool =
@@ -412,12 +408,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
     for (auto& [id, info] : infos.field_infos) {
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
-        std::sort(insert_files.begin(),
-                  insert_files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                             std::stol(b.substr(b.find_last_of('/') + 1));
-                  });
+        storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
@@ -822,7 +813,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         case DataType::JSON: {
-            bulk_subscript_ptr_impl<Json, std::string>(
+            bulk_subscript_ptr_impl<Json>(
                 vec_ptr,
                 seg_offsets,
                 count,
@@ -888,21 +879,21 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     indexing_record_.GetDataFromIndex(field_id, seg_offsets, count, 0, output);
 }
 
-template <typename S, typename T>
+template <typename S>
 void
 SegmentGrowingImpl::bulk_subscript_ptr_impl(
     const VectorBase* vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
-    google::protobuf::RepeatedPtrField<T>* dst) const {
+    google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (IsVariableTypeSupportInChunk<S> && mmap_descriptor_ != nullptr) {
-            dst->at(i) = std::move(T(src.view_element(offset)));
+            dst->at(i) = std::move(std::string(src.view_element(offset)));
         } else {
-            dst->at(i) = std::move(T(src[offset]));
+            dst->at(i) = std::move(std::string(src[offset]));
         }
     }
 }
